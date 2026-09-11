@@ -27,7 +27,17 @@ npx skills add FrancyJGLisboa/cftc-agricultural-positioning --skill cftc-agricul
 
 The skill follows the [Agent Skills specification](https://agentskills.io/specification). Runtime compatibility is based on supported installation paths, not end-to-end certification on every host.
 
-## What the panel measures
+## What version 2.0 adds
+
+New destinations default to Disaggregated Managed Money; existing Legacy destinations keep their category. Use separate state directories for distinct report/unit/market combinations.
+
+- Expanded weekly table: open interest, OI change, net and previous/4/13-week changes.
+- Five-year minimum/maximum net positions with dates and explicit history windows.
+- Seasonal net charts: current year, previous year, and prior-five-calendar-year median/range.
+- Display net in contracts, million metric tonnes of physical equivalent, or percent of open interest.
+- One-page commodity details with seasonal charts, history and decomposition.
+
+## Core diagnostics
 
 - Historical net-position percentile over the preceding five calendar years.
 - Net positioning as a signed percentage of open interest.
@@ -36,7 +46,7 @@ The skill follows the [Agent Skills specification](https://agentskills.io/specif
 
 Coverage: corn, soybeans, Chicago SRW wheat, Kansas HRW wheat, soybean meal, soybean oil, live cattle, lean hogs, feeder cattle, cotton No. 2, sugar No. 11, coffee C, and cocoa.
 
-Source: official CFTC dataset `6dca-aqww`, Legacy Futures Only, Non-Commercial. No Managed Money substitution, prices, dollar conversion, cross-commodity contract totals, or private data providers. Spreading stays separate. Read the [methodology](skills/cftc-agricultural-positioning/references/methodology.md).
+Sources: official CFTC `72hh-3qpy` (Disaggregated Futures Only, Managed Money) or `6dca-aqww` (Legacy Futures Only, Non-Commercial). Categories never mix. No prices, dollar conversion, cash-flow estimates, cross-commodity totals or private providers. Spreading stays separate. Read the [methodology](skills/cftc-agricultural-positioning/references/methodology.md).
 
 ## Run directly
 
@@ -60,6 +70,19 @@ The code does not infer delivery from a generated file. A pending edition is saf
 
 To ask an agent: **Use cftc-agricultural-positioning to update the agricultural radar. Automatically display the validated panel with a Download PDF link immediately underneath.**
 
+## Views
+
+```bash
+python skills/cftc-agricultural-positioning/scripts/radar.py run --state-dir ./mm-state --report managed-money
+python skills/cftc-agricultural-positioning/scripts/radar.py run --state-dir ./mm-mmt-state --report managed-money --unit mmt
+python skills/cftc-agricultural-positioning/scripts/radar.py run --state-dir ./corn-state --report managed-money --market 002602 --unit pct-oi
+python skills/cftc-agricultural-positioning/scripts/radar.py run --state-dir ./legacy-state --report legacy
+```
+
+Ask naturally: **Show Managed Money positioning in million metric tonnes**, or **Show the corn detail with seasonal positioning as a percentage of open interest**. Supply a separate persistent state directory for each view. Subsequent `run` calls may omit view options to reuse the saved configuration.
+
+MMT is a physical equivalent, not money invested or deliverable inventory. Conversion requires recognized official contract units. Percentage-of-OI changes are differences in percentage points. The table keeps open interest and extrema in contracts. Four- and thirteen-week comparisons use exact calendar dates; missing dates or intervening gaps give N/A. Seasonal bands require at least three of the preceding five calendar years per bin, without interpolation.
+
 ## Development
 
 ```bash
@@ -71,7 +94,7 @@ Tests use synthetic records, not market evidence. Collection additionally valida
 Reproduce an official saved snapshot without publishing:
 
 ```bash
-python skills/cftc-agricultural-positioning/scripts/radar.py render --input /path/to/cftc-source.json --output /path/to/empty-output-directory
+python skills/cftc-agricultural-positioning/scripts/radar.py render --input /path/to/cftc-source.json --output /path/to/empty-output-directory --report managed-money
 ```
 
-Both outputs are explicitly labeled offline. Position dates differ from release dates. Descriptive extremes do not predict returns or prove causes.
+Use `--report legacy` for saved Legacy data. Both outputs are explicitly labeled offline. Position dates differ from release dates. Descriptive extremes do not predict returns or prove causes.

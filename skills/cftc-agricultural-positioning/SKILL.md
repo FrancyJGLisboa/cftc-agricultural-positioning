@@ -1,6 +1,6 @@
 ---
 name: cftc-agricultural-positioning
-description: Generate an English agricultural positioning decision panel from official CFTC Legacy Futures Only Non-Commercial data. Use for CFTC positioning updates, historical extremes, open-interest normalization, change decomposition, and persistence across thirteen agricultural markets. Automatically display the validated panel with a PDF download immediately underneath for each new or revised latest snapshot.
+description: Generate English agricultural positioning panels from official CFTC Managed Money or Legacy Non-Commercial futures-only data. Use for weekly tables, historical extremes, seasonality, physical equivalents, open-interest normalization, change decomposition, and persistence across thirteen agricultural markets. Automatically display the validated panel with a PDF download immediately underneath for each new or revised latest snapshot.
 ---
 
 # CFTC Agricultural Positioning
@@ -12,6 +12,17 @@ Automatically display one English panel image, followed immediately underneath b
 Resolve this skill's directory from its installation location, never from a previous session path. Use Python 3.10 or newer with this directory's `requirements.txt`. Prefer an existing approved environment with compatible dependencies; create a virtual environment only where package installation is permitted. Read [installation.md](references/installation.md) for manual VS Code/Copilot installation without Node.js or npx, corporate Python setup, and other runtime installation paths. The copy step does not install Python dependencies.
 
 Use an absolute `--state-dir` on persistent writable storage **outside the skill installation**. Reuse it across invocations. Use a separate directory for development or another delivery destination. Do not import another radar's state or reset existing publication history.
+
+## Select the view
+
+Use Managed Money for a new destination unless the user requests Legacy Non-Commercial. Existing state directories retain their category, units and summary/detail view. Do not silently switch categories or reuse another view's publication history. Use a distinct persistent state directory for each report/unit/market combination.
+
+- `--report managed-money`: Disaggregated Futures Only, dataset `72hh-3qpy`.
+- `--report legacy`: Legacy Futures Only, dataset `6dca-aqww`.
+- `--unit contracts` (default), `--unit mmt` (million metric tonnes of physical equivalent), or `--unit pct-oi`.
+- `--market CODE`: automatically display that commodity's detail page, with the matching PDF directly below it. Omit for the thirteen-market summary. Find codes in [methodology.md](references/methodology.md).
+
+Omitted options on `run` reuse the existing destination's settings. For a saved snapshot, `render` defaults to Managed Money; specify `--report legacy` for Legacy evidence. A category mismatch fails validation rather than substituting data.
 
 ## Execute
 
@@ -52,15 +63,17 @@ Generated files, opening an image for internal inspection, or a planned final re
 
 ## Preserve the analytical contract
 
-Use only public CFTC dataset `6dca-aqww`, Legacy Futures Only, Non-Commercial, and the thirteen bundled market codes. Never substitute Managed Money, Combined, prices, other vendors, or image estimates. Plot longs positively and shorts negatively; net equals source longs minus source positive shorts. Preserve spreading separately. Do not sum contracts across commodities or convert them to dollars.
+Use only the selected official CFTC futures-only dataset and the thirteen bundled market codes. Keep Managed Money and Legacy Non-Commercial histories separate. Never substitute Combined, prices, other vendors or image estimates. Plot longs positively and shorts negatively; net equals source longs minus source positive shorts. Preserve spreading separately. Do not sum contracts or physical equivalents across commodities, estimate dollars or label positioning changes as cash flows.
 
-Keep the four deterministic measures: prior-five-year net percentile excluding the current observation; signed net / open interest; change in longs and minus change in shorts; consecutive directional net changes. Read [methodology.md](references/methodology.md) for definitions, coverage rules, and source links. Describe review scenarios, not trading recommendations or proven causes.
+Use only the bundled physical conversion registry after matching each row's official `contract_units`. Unknown or changed units block MMT rendering; never guess a replacement factor. MMT means physical equivalent, not inventory, delivery commitments or actual investment. Conversion by a constant does not change a percentile or the shape of a series.
+
+Keep the four deterministic measures: prior-five-year net percentile excluding the current observation; signed net / open interest; change in longs and minus change in shorts; consecutive directional net changes. Read [methodology.md](references/methodology.md) for definitions, coverage rules, and source links. Add open-interest changes, exact-calendar 4/13-week net changes, five-year minimum/maximum net and their dates, and seasonal net curves. The table keeps OI and extrema in contracts even when another display unit is selected. Percent-of-OI changes are percentage-point differences; they are not contract changes divided by OI. Seasonal bands use the prior five calendar years and require at least three available years per bin. Missing comparisons remain N/A, without interpolation. Describe review scenarios, not trading recommendations or proven causes.
 
 Treat the position date separately from the publication date. The API maximum alone does not prove that the latest scheduled release has arrived. Use the official release calendar when explaining a delay. Never depend on the legacy TXT endpoint.
 
 ## Reproduce or maintain
 
-For an explicitly requested offline reproduction, use `radar.py render --input SAVED_CFTC_JSON --output EMPTY_DIRECTORY`. It labels the panel offline and never changes publication state. Do not use synthetic test fixtures as market observations.
+For an explicitly requested offline reproduction, use `radar.py render --input SAVED_CFTC_JSON --output EMPTY_DIRECTORY --report managed-money`. It labels the panel offline and never changes publication state. Do not use synthetic test fixtures as market observations.
 
 Before modifying calculations or delivery behavior, run:
 
