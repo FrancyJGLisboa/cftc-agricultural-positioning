@@ -11,17 +11,28 @@ An English Agent Skill that turns official CFTC agricultural positioning into on
 
 The final successful user-facing output is **one PNG image**. A recurring check with no new or revised latest snapshot stays silent. Data, detailed charts, validation receipts, and delivery state remain internal unless requested.
 
-## Install
+## Install in VS Code without Node.js or npx
 
-After this repository is published at `FrancyJGLisboa/cftc-agricultural-positioning`:
+With GitHub Copilot in VS Code, installation is a folder copy:
+
+1. On [GitHub](https://github.com/FrancyJGLisboa/cftc-agricultural-positioning), select **Code > Download ZIP** and extract it, or obtain an internally approved copy.
+2. Copy the complete `skills/cftc-agricultural-positioning` folder into `<your-project>/.github/skills/`.
+3. Open that project in VS Code. In Copilot Chat, type `/` and select `cftc-agricultural-positioning`.
+4. Use an approved Python environment with the dependencies below before requesting a live panel.
+
+The resulting entrypoint is `.github/skills/cftc-agricultural-positioning/SKILL.md`. No Node.js, npm, npx, Git, or administrator rights are needed for the folder copy into a writable project. An organization-approved VS Code/Copilot version with Agent Skills support is required; see the [official VS Code documentation](https://code.visualstudio.com/docs/agent-customization/agent-skills).
+
+**Running the analysis still requires Python 3.10+, matplotlib, numpy, and HTTPS access to publicreporting.cftc.gov.** Use existing approved dependencies or your organization's environment provisioning process. Copying the folder does not install Python packages or provision a remote runner.
+
+See the [installation guide](skills/cftc-agricultural-positioning/references/installation.md) for Windows paths, personal Copilot installation, the optional Python copy helper, corporate environment setup, and other runtimes.
+
+If npm package execution is permitted, the Agent Skills CLI remains optional:
 
 ```bash
 npx skills add FrancyJGLisboa/cftc-agricultural-positioning --skill cftc-agricultural-positioning
 ```
 
-Select your runtime, then install the Python dependencies using the [installation guide](skills/cftc-agricultural-positioning/references/installation.md). That guide also covers a no-Node installation and Windows commands.
-
-The skill follows the [Agent Skills specification](https://agentskills.io/specification). The [skills CLI](https://github.com/vercel-labs/skills) can install it for supported runtimes, including Codex, Claude Code, and OpenCode. A plain Python command and a JSON delivery protocol support other agent frameworks. These are supported integration paths, not a claim of end-to-end certification on every host.
+The skill follows the [Agent Skills specification](https://agentskills.io/specification). Runtime compatibility is based on supported installation paths, not end-to-end certification on every host.
 
 ## What the panel measures
 
@@ -36,7 +47,7 @@ Source: official CFTC dataset `6dca-aqww`, Legacy Futures Only, Non-Commercial. 
 
 ## Run directly
 
-Requires Python 3.10+ and outbound access to publicreporting.cftc.gov. No API key is required.
+Requires Python 3.10+ and outbound access to publicreporting.cftc.gov. No API key is required. The example below creates an environment and installs packages only where permitted. With an approved compatible environment, use its Python executable directly and skip those setup steps. For a manually installed skill, use its installed path instead of `skills/`.
 
 ```bash
 python -m venv .venv

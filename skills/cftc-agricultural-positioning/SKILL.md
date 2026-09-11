@@ -9,7 +9,7 @@ Produce one English panel as the only successful user-facing output. Keep data, 
 
 ## Setup
 
-Resolve this skill's directory from its installation location, never from a previous session path. Use Python 3.10 or newer with this directory's `requirements.txt`. Prefer an existing environment with compatible dependencies; otherwise create a virtual environment. Read [installation.md](references/installation.md) for runtime-specific setup and GitHub installation.
+Resolve this skill's directory from its installation location, never from a previous session path. Use Python 3.10 or newer with this directory's `requirements.txt`. Prefer an existing approved environment with compatible dependencies; create a virtual environment only where package installation is permitted. Read [installation.md](references/installation.md) for manual VS Code/Copilot installation without Node.js or npx, corporate Python setup, and other runtime installation paths. The copy step does not install Python dependencies.
 
 Use an absolute `--state-dir` on persistent writable storage **outside the skill installation**. Reuse it across invocations. Use a separate directory for development or another delivery destination. Do not import another radar's state or reset existing publication history.
 
