@@ -1,0 +1,66 @@
+# CFTC Agricultural Positioning
+
+An English Agent Skill that turns official CFTC agricultural positioning into one decision panel.
+
+The final successful user-facing output is **one PNG image**. A recurring check with no new or revised latest snapshot stays silent. Data, detailed charts, validation receipts, and delivery state remain internal unless requested.
+
+## Install
+
+After this repository is published at `FrancyJGLisboa/cftc-agricultural-positioning`:
+
+```bash
+npx skills add FrancyJGLisboa/cftc-agricultural-positioning --skill cftc-agricultural-positioning
+```
+
+Select your runtime, then install the Python dependencies using the [installation guide](skills/cftc-agricultural-positioning/references/installation.md). That guide also covers a no-Node installation and Windows commands.
+
+The skill follows the [Agent Skills specification](https://agentskills.io/specification). The [skills CLI](https://github.com/vercel-labs/skills) can install it for supported runtimes, including Codex, Claude Code, and OpenCode. A plain Python command and a JSON delivery protocol support other agent frameworks. These are supported integration paths, not a claim of end-to-end certification on every host.
+
+## What the panel measures
+
+- Historical net-position percentile over the preceding five calendar years.
+- Net positioning as a signed percentage of open interest.
+- Net change decomposed into changes in longs and shorts.
+- Persistence of consecutive increases or decreases in net positioning.
+
+Coverage: corn, soybeans, Chicago SRW wheat, Kansas HRW wheat, soybean meal, soybean oil, live cattle, lean hogs, feeder cattle, cotton No. 2, sugar No. 11, coffee C, and cocoa.
+
+Source: official CFTC dataset `6dca-aqww`, Legacy Futures Only, Non-Commercial. No Managed Money substitution, prices, dollar conversion, cross-commodity contract totals, or private data providers. Spreading stays separate. Read the [methodology](skills/cftc-agricultural-positioning/references/methodology.md).
+
+## Run directly
+
+Requires Python 3.10+ and outbound access to publicreporting.cftc.gov. No API key is required.
+
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install -r skills/cftc-agricultural-positioning/requirements.txt
+.venv/bin/python skills/cftc-agricultural-positioning/scripts/radar.py run --state-dir ./radar-state
+```
+
+On Windows, use `.venv\Scripts\python.exe` in place of `.venv/bin/python`.
+
+An unchanged check prints nothing and exits successfully. A new edition prints internal READY JSON with the panel path, evidence directory, and delivery idempotency key. Inspect the panel and hand it to the host's durable delivery mechanism. Only after confirmation, call:
+
+```bash
+.venv/bin/python skills/cftc-agricultural-positioning/scripts/radar.py ack --state-dir ./radar-state --edition-id ID_FROM_READY --delivery-receipt CONFIRMED_HOST_RECEIPT
+```
+
+The code does not infer delivery from a generated file. A pending edition is safely retried. The host must supply actual image delivery, scheduling, and operational notifications. A single dispatcher and destination-side idempotency are required for reliable duplicate suppression across crashes. See [operations](skills/cftc-agricultural-positioning/references/operations.md).
+
+To ask an agent: **Use cftc-agricultural-positioning to update the agricultural radar. Return only the validated panel.**
+
+## Development
+
+```bash
+python -m unittest discover -s skills/cftc-agricultural-positioning/scripts -p 'test_*.py' -v
+```
+
+Tests use synthetic records, not market evidence. Collection additionally validates all source rows, complete latest coverage, integer counts, open-interest identities, and decomposition. CI exercises supported Python versions on Linux and Windows. Runtime state and retrieved market data are excluded from this repository.
+
+Reproduce an official saved snapshot without publishing:
+
+```bash
+python skills/cftc-agricultural-positioning/scripts/radar.py render --input /path/to/cftc-source.json --output /path/to/empty-output-directory
+```
+
+The image is explicitly labeled offline. Position dates differ from release dates. Descriptive extremes do not predict returns or prove causes.
