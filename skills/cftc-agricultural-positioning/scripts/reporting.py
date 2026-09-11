@@ -92,6 +92,14 @@ def render_v2(rows,out,latest,fetched,markets,offline=False):
         fig.text(.045,y-.021,textwrap.shorten(d['research_question'],width=170,placeholder='…'),fontsize=9,color='#607486')
     fig.text(.045,.088,'Percentile: preceding five years, excluding the current observation; ties have weight 0.5. Change in net = change in longs - change in shorts.\nPersistence counts consecutive changes, not calendar weeks; zero resets the streak. Highlights are not trading signals.',fontsize=9,color='#607486',linespacing=1.6)
     stamp='OFFLINE REPRODUCTION' if offline else 'retrieved'
-    fig.text(.045,.027,f'Sole source: CFTC • Dataset 6dca-aqww • {stamp} {fetched[:16]} UTC • methodology 2.0 | English edition 1.0',fontsize=8,color='#607486')
-    fig.savefig(out/'cftc-agricultural-positioning.png',dpi=145);plt.close(fig)
+    fig.text(.045,.027,f'Sole source: CFTC • Dataset 6dca-aqww • {stamp} {fetched[:16]} UTC • methodology 2.0 | English edition 1.1',fontsize=8,color='#607486')
+    # Both deliverables come from the same completed figure, before closing it.
+    try:
+        fig.savefig(out/'cftc-agricultural-positioning.png',dpi=145)
+        fig.savefig(out/'cftc-agricultural-positioning.pdf',format='pdf',
+                    metadata={'Title': 'CFTC Agricultural Positioning | ' + latest,
+                              'Subject': 'The same decision panel as the PNG; ' + stamp,
+                              'Author': 'CFTC Agricultural Positioning skill'})
+    finally:
+        plt.close(fig)
     return last,all_diag,ranked

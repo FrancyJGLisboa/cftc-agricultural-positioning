@@ -20,8 +20,9 @@ import uuid
 from analytics import VERSION, enrich
 from cftc_positioning import FIELDS, MARKETS, PAGE, WHERE, fetch, fingerprint, newest, validate
 
-EDITION_VERSION = '1.0.0'
+EDITION_VERSION = '1.1.0'
 PANEL = 'cftc-agricultural-positioning.png'
+PDF = 'cftc-agricultural-positioning.pdf'
 
 
 def now():
@@ -128,6 +129,9 @@ def build(raw, out, provenance, offline=False):
     from reporting import render_v2
     generated = now()
     last, diagnostic_rows, highlights = render_v2(rows, out, latest, provenance.get('fetched_at_utc') or generated, MARKETS, offline=offline)
+    for filename, signature in [(PANEL, b'\x89PNG\r\n\x1a\n'), (PDF, b'%PDF-')]:
+        if not (out / filename).read_bytes().startswith(signature):
+            raise ValueError('Renderer did not produce a valid ' + filename)
     write_csv(out / 'latest-report.csv', last)
     atomic_json(out / 'diagnostics.json', diagnostic_rows)
     atomic_json(out / 'highlights.json', highlights)
@@ -141,7 +145,8 @@ def build(raw, out, provenance, offline=False):
         'observations_per_market': {c: sum(r['market_code'] == c for r in rows) for c in MARKETS},
         'checks': {'unique_date_market': True, 'nonnegative_integer_counts': True,
                    'futures_only': True, 'both_open_interest_identities_all_rows': True,
-                   'latest_universe_complete': True, 'decomposition': True, 'percentile_range': True},
+                   'latest_universe_complete': True, 'decomposition': True, 'percentile_range': True,
+                   'panel_and_pdf_generated': True},
         'freshness': 'Position date is not publication date. API maximum is not proof of the latest scheduled release.',
         'files': {p.name: digest(p) for p in sorted(out.iterdir()) if p.is_file()},
     }
@@ -159,17 +164,79 @@ def verify_edition(root, entry):
     return folder
 
 
+def presentation(folder):
+    """Ordered host instructions; file generation alone is not display or delivery."""
+    return {'layout': 'image_then_pdf_link', 'automatic_display': True,
+            'items': [
+                {'kind': 'image', 'path': str(folder / PANEL), 'mime_type': 'image/png',
+                 'alt': 'CFTC Agricultural Positioning'},
+                {'kind': 'download', 'path': str(folder / PDF), 'mime_type': 'application/pdf',
+                 'label': 'Download PDF'}]}
+
+
 def ready(root, entry):
+    if PANEL not in entry['files'] or PDF not in entry['files']:
+        raise ValueError('Edition is missing the required PNG/PDF pair.')
     folder = verify_edition(root, entry)
     return {'status': 'READY', 'edition_id': entry['edition_id'], 'report_date': entry['report_date'],
             'panel_path': str(folder / PANEL), 'panel_sha256': entry['files'][PANEL],
+            'pdf_path': str(folder / PDF), 'pdf_sha256': entry['files'][PDF],
+            'presentation': presentation(folder),
             'evidence_directory': str(folder), 'delivery_idempotency_key': entry['edition_id']}
+
+
+def prepare(root, state, raw, provenance, date, source_hash, supersedes=None):
+    staging = Path(tempfile.mkdtemp(prefix='.building-', dir=root))
+    try:
+        build(raw, staging, provenance)
+        # A partial render must never replace the pending edition.
+        if not all((staging / name).is_file() for name in (PANEL, PDF)):
+            raise ValueError('Renderer must produce both PNG and PDF.')
+        edition_id = date + '-' + source_hash[:16] + '-' + uuid.uuid4().hex[:8]
+        editions = root / 'editions'
+        editions.mkdir(exist_ok=True)
+        staging.rename(editions / edition_id)
+        folder = editions / edition_id
+        entry = {'edition_id': edition_id, 'report_date': date, 'source_fingerprint': source_hash,
+                 'edition_version': EDITION_VERSION,
+                 'files': {p.name: digest(p) for p in folder.iterdir() if p.is_file()}}
+        state['pending'] = entry
+        event = {'event': 'prepared', 'at_utc': now(), 'edition_id': edition_id}
+        if supersedes:
+            event['supersedes_pending_edition'] = supersedes
+        state['run_log'].append(event)
+        atomic_json(root / 'state.json', state)
+        return ready(root, entry)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+
+
+def upgrade_pending(root, state):
+    """Rebuild a legacy pending edition from its verified evidence, without fetching."""
+    entry = state['pending']
+    if entry['edition_version'] != '1.0.0':
+        raise ValueError('Unsupported pending edition version; use the matching skill version or an explicit migration.')
+    folder = verify_edition(root, entry)
+    if not {'cftc-source.json', 'validation.json'}.issubset(entry['files']):
+        raise ValueError('Legacy pending edition lacks verified source evidence; restore it before upgrading.')
+    raw = json.loads((folder / 'cftc-source.json').read_text(encoding='utf-8'))
+    receipt = json.loads((folder / 'validation.json').read_text(encoding='utf-8'))
+    rows = validate(raw)
+    date = max(r['report_date'] for r in rows)
+    source_hash = fingerprint([r for r in raw if r['report_date_as_yyyy_mm_dd'][:10] == date])
+    if date != entry['report_date'] or source_hash != entry['source_fingerprint']:
+        raise ValueError('Legacy pending source does not match its edition record.')
+    provenance = {k: receipt[k] for k in ('source_query', 'download_sha256', 'fetched_at_utc') if k in receipt}
+    return prepare(root, state, raw, provenance, date, source_hash, supersedes=entry['edition_id'])
 
 
 def run(root):
     with lock(root):
         state = load_state(root)
         if state['pending']:
+            if state['pending']['edition_version'] != EDITION_VERSION:
+                return upgrade_pending(root, state)
             return ready(root, state['pending'])
         date, source_hash = check_source()
         guard_date(state, date)
@@ -186,24 +253,7 @@ def run(root):
         # Persist the initial empty state before materializing any edition; never infer delivery from files.
         if not (root / 'state.json').exists():
             atomic_json(root / 'state.json', state)
-        staging = Path(tempfile.mkdtemp(prefix='.building-', dir=root))
-        try:
-            receipt = build(raw, staging, provenance)
-            edition_id = date + '-' + source_hash[:16] + '-' + uuid.uuid4().hex[:8]
-            editions = root / 'editions'
-            editions.mkdir(exist_ok=True)
-            staging.rename(editions / edition_id)
-            folder = editions / edition_id
-            entry = {'edition_id': edition_id, 'report_date': date, 'source_fingerprint': source_hash,
-                     'edition_version': EDITION_VERSION,
-                     'files': {p.name: digest(p) for p in folder.iterdir() if p.is_file()}}
-            state['pending'] = entry
-            state['run_log'].append({'event': 'prepared', 'at_utc': now(), 'edition_id': edition_id})
-            atomic_json(root / 'state.json', state)
-            return ready(root, entry)
-        finally:
-            if staging.exists():
-                shutil.rmtree(staging)
+        return prepare(root, state, raw, provenance, date, source_hash)
 
 
 def acknowledge(root, edition_id, delivery_receipt):
@@ -216,7 +266,9 @@ def acknowledge(root, edition_id, delivery_receipt):
             raise ValueError('No matching pending edition.')
         if entry['edition_id'] != edition_id:
             raise ValueError('Acknowledgement does not match the pending edition.')
-        verify_edition(root, entry)
+        if entry['edition_version'] != EDITION_VERSION:
+            raise ValueError('Run the skill to upgrade the pending edition before acknowledging the PNG/PDF pair.')
+        ready(root, entry)
         state['last_published'] = entry
         state['pending'] = None
         state['last_success_at_utc'] = now()
@@ -249,6 +301,8 @@ def main():
             receipt = build(raw, args.output.resolve(), {'fetched_at_utc': None, 'source_query': None,
                            'input_sha256': digest(args.input)}, offline=True)
             result = {'status': 'OFFLINE', 'panel_path': str(args.output.resolve() / PANEL),
+                      'pdf_path': str(args.output.resolve() / PDF),
+                      'presentation': presentation(args.output.resolve()),
                       'report_date': receipt['latest_report_date']}
         if result is not None:
             print(json.dumps(result))
