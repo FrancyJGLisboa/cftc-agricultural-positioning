@@ -47,6 +47,20 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaises(KeyError):validate(raw)
 
 
+class RenderingTests(unittest.TestCase):
+    def test_real_renderer_produces_hashed_pair(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            out=Path(temporary)
+            receipt=radar.build(snapshot('2025-12-30')+snapshot(),out,
+                                {'fetched_at_utc':'2026-01-09T00:00:00+00:00'},offline=True)
+            self.assertTrue((out/radar.PANEL).read_bytes().startswith(b'\x89PNG\r\n\x1a\n'))
+            self.assertTrue((out/radar.PDF).read_bytes().startswith(b'%PDF-'))
+            for name in (radar.PANEL,radar.PDF):
+                self.assertGreater((out/name).stat().st_size,1000)
+                self.assertEqual(receipt['files'][name],radar.digest(out/name))
+            self.assertTrue(receipt['offline'])
+
+
 class StateTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
@@ -54,6 +68,8 @@ class StateTests(unittest.TestCase):
     def tearDown(self):self.tmp.cleanup()
     def fake_build(self,raw,out,provenance):
         (out/radar.PANEL).write_bytes(b'test image bytes')
+        (out/radar.PDF).write_bytes(b'%PDF-test document bytes')
+        radar.atomic_json(out/'cftc-source.json',raw)
         radar.atomic_json(out/'validation.json',{'synthetic_test':True})
         return {}
     def prepare(self):
@@ -76,6 +92,67 @@ class StateTests(unittest.TestCase):
         ready=self.prepare();Path(ready['panel_path']).write_bytes(b'changed')
         with self.assertRaises(ValueError):radar.acknowledge(self.root,ready['edition_id'],'receipt')
         self.assertIsNone(radar.load_state(self.root)['last_published'])
+    def test_pair_delivery_order_and_pdf_hash(self):
+        result=self.prepare()
+        items=result['presentation']['items']
+        self.assertEqual([item['kind'] for item in items],['image','download'])
+        self.assertEqual(items[0]['path'],result['panel_path'])
+        self.assertEqual(items[1]['path'],result['pdf_path'])
+        self.assertEqual(items[1]['label'],'Download PDF')
+        self.assertTrue(result['presentation']['automatic_display'])
+        self.assertEqual(result['pdf_sha256'],radar.digest(result['pdf_path']))
+    def test_pdf_missing_or_tampered_blocks_delivery_and_ack(self):
+        result=self.prepare();pdf=Path(result['pdf_path'])
+        pdf.write_bytes(b'changed')
+        with self.assertRaises(ValueError):radar.run(self.root)
+        with self.assertRaises(ValueError):radar.acknowledge(self.root,result['edition_id'],'receipt')
+        pdf.unlink()
+        with self.assertRaises(FileNotFoundError):radar.run(self.root)
+        self.assertIsNone(radar.load_state(self.root)['last_published'])
+    def legacy_pending(self):
+        result=self.prepare();state=radar.load_state(self.root)
+        state['pending']['edition_version']='1.0.0'
+        del state['pending']['files'][radar.PDF]
+        Path(result['pdf_path']).unlink()
+        radar.atomic_json(self.root/'state.json',state)
+        return result
+    def test_legacy_pending_upgrades_from_evidence_without_network(self):
+        old=self.legacy_pending();old_folder=Path(old['evidence_directory'])
+        old_files={p.name:p.read_bytes() for p in old_folder.iterdir()}
+        with patch.object(radar,'check_source') as check,patch.object(radar,'collect') as collect,patch.object(radar,'build',side_effect=self.fake_build):
+            result=radar.run(self.root)
+        check.assert_not_called();collect.assert_not_called()
+        self.assertNotEqual(old['edition_id'],result['edition_id'])
+        self.assertEqual(old['report_date'],result['report_date'])
+        self.assertTrue(Path(result['pdf_path']).is_file())
+        self.assertEqual(old_files,{p.name:p.read_bytes() for p in old_folder.iterdir()})
+        state=radar.load_state(self.root)
+        self.assertEqual(state['run_log'][-1]['supersedes_pending_edition'],old['edition_id'])
+        self.assertIsNone(state['last_published'])
+        with patch.object(radar,'check_source') as check:
+            self.assertEqual(result,radar.run(self.root));check.assert_not_called()
+    def test_failed_upgrade_keeps_legacy_pending_and_state(self):
+        old=self.legacy_pending();before=(self.root/'state.json').read_bytes()
+        with patch.object(radar,'build',side_effect=OSError('PDF failed')):
+            with self.assertRaises(OSError):radar.run(self.root)
+        self.assertEqual(before,(self.root/'state.json').read_bytes())
+        self.assertTrue(Path(old['panel_path']).is_file())
+        with self.assertRaises(ValueError):radar.acknowledge(self.root,old['edition_id'],'receipt')
+    def test_partial_pair_does_not_prepare_an_edition(self):
+        def incomplete(raw,out,provenance):
+            (out/radar.PANEL).write_bytes(b'test image bytes')
+        with patch.object(radar,'check_source',return_value=(self.date,self.hash)),patch.object(radar,'collect',return_value=(self.raw,{})),patch.object(radar,'build',side_effect=incomplete):
+            with self.assertRaises(ValueError):radar.run(self.root)
+        state=radar.load_state(self.root)
+        self.assertIsNone(state['pending']);self.assertIsNone(state['last_published'])
+    def test_published_legacy_version_renders_pair_once(self):
+        old=self.prepare();radar.acknowledge(self.root,old['edition_id'],'receipt')
+        state=radar.load_state(self.root);state['last_published']['edition_version']='1.0.0'
+        radar.atomic_json(self.root/'state.json',state)
+        new=self.prepare();self.assertNotEqual(old['edition_id'],new['edition_id'])
+        radar.acknowledge(self.root,new['edition_id'],'pair receipt')
+        with patch.object(radar,'check_source',return_value=(self.date,self.hash)),patch.object(radar,'collect') as collect:
+            self.assertIsNone(radar.run(self.root));collect.assert_not_called()
     def test_ack_wrong_id_and_idempotent_ack(self):
         ready=self.prepare()
         with self.assertRaises(ValueError):radar.acknowledge(self.root,'wrong','receipt')

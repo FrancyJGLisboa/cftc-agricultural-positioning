@@ -9,7 +9,7 @@ README = '''# CFTC Agricultural Positioning
 
 An English Agent Skill that turns official CFTC agricultural positioning into one decision panel.
 
-The final successful user-facing output is **one PNG image**. A recurring check with no new or revised latest snapshot stays silent. Data, detailed charts, validation receipts, and delivery state remain internal unless requested.
+The final successful user-facing output is **the panel displayed automatically, with a Download PDF link immediately underneath**. The PNG and matching one-page PDF come from the same Matplotlib figure, with no new runtime dependency. A recurring check with no new or revised latest snapshot stays silent. Data, detailed charts, validation receipts, and delivery state remain internal unless requested.
 
 ## Install in VS Code without Node.js or npx
 
@@ -57,15 +57,15 @@ python -m venv .venv
 
 On Windows, use `.venv\\Scripts\\python.exe` in place of `.venv/bin/python`.
 
-An unchanged check prints nothing and exits successfully. A new edition prints internal READY JSON with the panel path, evidence directory, and delivery idempotency key. Inspect the panel and hand it to the host's durable delivery mechanism. Only after confirmation, call:
+An unchanged check prints nothing and exits successfully. A new edition prints internal READY JSON with PNG/PDF paths and hashes, ordered presentation instructions, evidence directory, and delivery idempotency key. Inspect both outputs and use the host's rendering capability to display the panel and PDF link in that order. File generation alone does not display the report. Only after confirmation of the complete pair, call:
 
 ```bash
 .venv/bin/python skills/cftc-agricultural-positioning/scripts/radar.py ack --state-dir ./radar-state --edition-id ID_FROM_READY --delivery-receipt CONFIRMED_HOST_RECEIPT
 ```
 
-The code does not infer delivery from a generated file. A pending edition is safely retried. The host must supply actual image delivery, scheduling, and operational notifications. A single dispatcher and destination-side idempotency are required for reliable duplicate suppression across crashes. See [operations](skills/cftc-agricultural-positioning/references/operations.md).
+The code does not infer delivery from a generated file. A pending edition is safely retried. The host must supply actual panel display and PDF-link delivery, scheduling, and operational notifications. Hosts without a supported image display operation must expose accessible links and report that limitation; they must not claim automatic rendering succeeded. A single dispatcher and destination-side idempotency are required for reliable duplicate suppression across crashes. See [operations](skills/cftc-agricultural-positioning/references/operations.md).
 
-To ask an agent: **Use cftc-agricultural-positioning to update the agricultural radar. Return only the validated panel.**
+To ask an agent: **Use cftc-agricultural-positioning to update the agricultural radar. Automatically display the validated panel with a Download PDF link immediately underneath.**
 
 ## Development
 
@@ -81,7 +81,7 @@ Reproduce an official saved snapshot without publishing:
 python skills/cftc-agricultural-positioning/scripts/radar.py render --input /path/to/cftc-source.json --output /path/to/empty-output-directory
 ```
 
-The image is explicitly labeled offline. Position dates differ from release dates. Descriptive extremes do not predict returns or prove causes.
+Both outputs are explicitly labeled offline. Position dates differ from release dates. Descriptive extremes do not predict returns or prove causes.
 '''
 CI = '''name: Validate skill
 on: [push, pull_request, workflow_dispatch]

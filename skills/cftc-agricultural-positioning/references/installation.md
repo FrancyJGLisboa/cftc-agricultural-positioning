@@ -9,7 +9,7 @@ Installing this skill means copying a folder. It does not require a package mana
 3. Open your working project in VS Code. Create `.github/skills` in that project's root, then copy the **complete** `cftc-agricultural-positioning` folder into it. Use File Explorer, Finder, or VS Code's Explorer; no terminal command is needed to copy the files.
 4. Confirm the installed entrypoint is `<your-project>/.github/skills/cftc-agricultural-positioning/SKILL.md`, with `scripts`, `references`, `assets`, `agents`, and `requirements.txt` alongside it. Copying only `SKILL.md` is insufficient.
 5. In Copilot Chat, type `/` and look for `cftc-agricultural-positioning`. If it is absent, reopen the project and check that your organization-approved VS Code/Copilot version supports Agent Skills. Follow your organization's settings for external skills and script execution.
-6. Complete the Python setup below, then ask Copilot to use the skill with that Python executable and an absolute persistent state directory outside the installed skill.
+6. Complete the Python setup below, then ask Copilot to use the skill with that Python executable and an absolute persistent state directory outside the installed skill. The skill generates PNG and PDF together. Its agent instructions require automatic panel display with a PDF link underneath; the editor/agent must provide a supported preview and file-link mechanism.
 
 The project location and slash-command discovery follow the [official VS Code Agent Skills documentation](https://code.visualstudio.com/docs/agent-customization/agent-skills). VS Code is the editor; these discovery instructions specifically target GitHub Copilot. Other extensions can use different skill locations.
 
@@ -92,7 +92,7 @@ Windows PowerShell:
 
 When using an installed skill rather than a clone, substitute that skill's absolute directory. Give the runtime the selected Python executable and persistent state directory. No API key, account, price feed, ChatGPT-specific storage, or paid data subscription is required.
 
-Ask the agent: “Use cftc-agricultural-positioning to update the agricultural radar. Return only the validated panel.”
+Ask the agent: “Use cftc-agricultural-positioning to update the agricultural radar. Automatically display the validated panel with a Download PDF link immediately underneath.”
 
 ## Tests
 

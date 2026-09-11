@@ -1,11 +1,11 @@
 ---
 name: cftc-agricultural-positioning
-description: Generate an English agricultural positioning decision panel from official CFTC Legacy Futures Only Non-Commercial data. Use for CFTC positioning updates, historical extremes, open-interest normalization, change decomposition, and persistence across thirteen agricultural markets. Deliver one validated image per new or revised latest snapshot.
+description: Generate an English agricultural positioning decision panel from official CFTC Legacy Futures Only Non-Commercial data. Use for CFTC positioning updates, historical extremes, open-interest normalization, change decomposition, and persistence across thirteen agricultural markets. Automatically display the validated panel with a PDF download immediately underneath for each new or revised latest snapshot.
 ---
 
 # CFTC Agricultural Positioning
 
-Produce one English panel as the only successful user-facing output. Keep data, individual charts, validation evidence, and delivery state internal. Return no commentary with the successful panel. For recurring checks with unchanged data, use the host's silent-completion mechanism. Honor explicit requests for evidence or a different output contract.
+Automatically display one English panel image, followed immediately underneath by a **Download PDF** link to the matching one-page report. This ordered pair is the entire successful user-facing output; no introduction, summary, or intervening text. Keep data, individual charts, validation evidence, and delivery state internal. For recurring checks with unchanged data, use the host's silent-completion mechanism. Honor explicit requests for evidence or a different output contract.
 
 ## Setup
 
@@ -24,10 +24,22 @@ python /absolute/skill/scripts/radar.py run --state-dir /absolute/persistent/cft
 Interpret stdout as an internal JSON protocol:
 
 - Empty stdout with exit 0: no new edition. Finish silently.
-- `READY`: open `panel_path` and inspect legibility, English labels, position and comparison dates, category, units, metrics, and absence of unsupported causes or price targets. Inspect `validation.json` in `evidence_directory`. Use `delivery_idempotency_key` for the host's durable, deduplicated delivery.
+- `READY`: open `panel_path` and inspect legibility, English labels, position and comparison dates, category, units, metrics, and absence of unsupported causes or price targets. Check that `pdf_path` is the matching one-page panel, and inspect `validation.json` in `evidence_directory`. Both files must be intact before delivery. Use `delivery_idempotency_key` for the host's durable, deduplicated delivery.
 - Nonzero exit: preserve the previous valid edition. Send the structured stderr error to operational monitoring, deduplicated by `failure_signature`. If no monitoring channel exists, report the limitation plainly; never invent a panel or silently present old data as new.
 
-Retain the complete evidence directory durably. Deliver **only the panel image** using the host's attachment/rendering capability. Record confirmed delivery separately:
+Retain the complete evidence directory durably. Complete the display step in the same invocation; do not ask whether the user wants to see the result. Follow the ordered `presentation.items`: first render `panel_path` visibly, then place the `pdf_path` download link directly underneath, labeled **Download PDF**. Upload or attach both files using the host's supported mechanism and use its returned user-accessible targets. An image link alone, raw JSON, a filesystem path, or an inspection-tool result is not the requested display.
+
+For Markdown-capable hosts, the final response must have this structure (substitute the actual host-provided targets; do not output this as a code block):
+
+```markdown
+![CFTC Agricultural Positioning](IMAGE_TARGET)
+
+[Download PDF](PDF_TARGET)
+```
+
+In VS Code, use the available editor/preview integration if chat cannot render the image. A terminal-only host may need its configured graphical viewer. Never install a viewer or bypass permissions automatically. If the host provides no supported display operation, return accessible PNG/PDF links with a brief display limitation and keep delivery pending; do not claim automatic rendering succeeded. Read [operations.md](references/operations.md) for host integration and upgrade behavior.
+
+Record confirmed delivery of **both** items separately:
 
 ```bash
 python /absolute/skill/scripts/radar.py ack \
@@ -36,7 +48,7 @@ python /absolute/skill/scripts/radar.py ack \
   --delivery-receipt HOST_CONFIRMED_RECEIPT
 ```
 
-A generated file or planned final response is not confirmed delivery. If the host cannot run a post-delivery acknowledgement, leave the edition pending until its delivery or durable outbox receipt can be verified. Read [operations.md](references/operations.md) before configuring recurring delivery. The skill itself does not create a schedule or call a messaging service.
+Generated files, opening an image for internal inspection, or a planned final response are not confirmed delivery of the pair. If the host cannot run a post-delivery acknowledgement, leave the edition pending until its delivery or durable outbox receipt can be verified. Read [operations.md](references/operations.md) before configuring recurring delivery. The skill itself does not create a schedule or call a messaging service.
 
 ## Preserve the analytical contract
 
