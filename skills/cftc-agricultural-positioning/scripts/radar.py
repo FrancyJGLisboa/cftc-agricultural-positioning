@@ -18,9 +18,9 @@ import tempfile
 import uuid
 
 from analytics import VERSION, enrich
-from cftc_positioning import FIELDS, MARKETS, PAGE, WHERE, fetch, fingerprint, newest, validate
+from cftc_positioning import FIELDS, MARKETS, PAGE, WHERE, REPORTS, fetch, fingerprint, newest, validate
 
-EDITION_VERSION = '1.1.0'
+EDITION_VERSION = '2.0.0'
 PANEL = 'cftc-agricultural-positioning.png'
 PDF = 'cftc-agricultural-positioning.pdf'
 
@@ -90,17 +90,17 @@ def guard_date(state, report_date):
         raise ValueError('Source reference date regressed; preserving the last published edition.')
 
 
-def collect():
-    raw, query, raw_hash = fetch({'$select': ','.join(FIELDS), '$where': WHERE + " AND report_date_as_yyyy_mm_dd >= '2016-08-01T00:00:00.000'", '$order': 'report_date_as_yyyy_mm_dd,cftc_contract_market_code', '$limit': 50000})
+def collect(report='legacy'):
+    raw, query, raw_hash = fetch({'$select': ','.join(REPORTS[report]['fields']), '$where': WHERE + " AND report_date_as_yyyy_mm_dd >= '2016-08-01T00:00:00.000'", '$order': 'report_date_as_yyyy_mm_dd,cftc_contract_market_code', '$limit': 50000}, report)
     if len(raw) >= 50000:
         raise ValueError('Query may be truncated; pagination is required before publication.')
     return raw, {'source_query': query, 'download_sha256': raw_hash, 'fetched_at_utc': now()}
 
 
-def check_source():
-    date = newest()
-    raw, query, raw_hash = fetch({'$select': ','.join(FIELDS), '$where': WHERE + " AND report_date_as_yyyy_mm_dd='" + date + "'", '$limit': 100})
-    rows = validate(raw)
+def check_source(report='legacy'):
+    date = newest(report)
+    raw, query, raw_hash = fetch({'$select': ','.join(REPORTS[report]['fields']), '$where': WHERE + " AND report_date_as_yyyy_mm_dd='" + date + "'", '$limit': 100}, report)
+    rows = validate(raw, report)
     if len(rows) != 13 or {r['report_date'] for r in rows} != {date[:10]}:
         raise ValueError('Latest snapshot does not match the requested complete date.')
     return date[:10], fingerprint(raw)
@@ -113,9 +113,13 @@ def write_csv(path, rows):
         writer.writerows(rows)
 
 
-def build(raw, out, provenance, offline=False):
+def build(raw, out, provenance, offline=False, report='legacy', unit='contracts', market=None):
     """Validation precedes every artifact write. Out must be an empty staging directory."""
-    rows = enrich(validate(raw))
+    if report not in REPORTS or unit not in ('contracts','mmt','pct-oi') or (market and market not in MARKETS):
+        raise ValueError('Invalid report, unit or market')
+    rows = enrich(validate(raw, report))
+    if unit=='mmt' and any(r['tonnes_per_contract'] is None for r in rows):
+        raise ValueError('MMT requires recognized official contract units for every source row; use contracts or verify updated specifications.')
     latest = max(r['report_date'] for r in rows)
     if not all(r['decomposition_verified'] for r in rows if r['previous_report_date']):
         raise ValueError('Decomposition failed.')
@@ -128,16 +132,19 @@ def build(raw, out, provenance, offline=False):
     write_csv(out / 'history.csv', rows)
     from reporting import render_v2
     generated = now()
-    last, diagnostic_rows, highlights = render_v2(rows, out, latest, provenance.get('fetched_at_utc') or generated, MARKETS, offline=offline)
-    for filename, signature in [(PANEL, b'\x89PNG\r\n\x1a\n'), (PDF, b'%PDF-')]:
-        if not (out / filename).read_bytes().startswith(signature):
-            raise ValueError('Renderer did not produce a valid ' + filename)
+    last, diagnostic_rows, highlights = render_v2(rows, out, latest, provenance.get('fetched_at_utc') or generated, MARKETS, offline=offline, report=report, unit=unit, market=market)
+    for basename in ['cftc-agricultural-positioning', *MARKETS]:
+        for extension,signature in [('png', b'\x89PNG\r\n\x1a\n'),('pdf',b'%PDF-')]:
+            filename=basename+'.'+extension
+            data=(out/filename).read_bytes()
+            if len(data)<1000 or not data.startswith(signature) or (extension=='pdf' and not data.rstrip().endswith(b'%%EOF')):
+                raise ValueError('Renderer did not produce a complete '+filename)
     write_csv(out / 'latest-report.csv', last)
     atomic_json(out / 'diagnostics.json', diagnostic_rows)
     atomic_json(out / 'highlights.json', highlights)
     receipt = {
-        'dataset': '6dca-aqww', 'source_page': PAGE, 'category': 'Non-Commercial',
-        'report_type': 'FutOnly', 'units': 'contracts', 'methodology_version': VERSION,
+        'dataset': REPORTS[report]['dataset'], 'source_page': REPORTS[report]['page'], 'category': REPORTS[report]['category'],
+        'report_type': 'FutOnly', 'units': 'contracts', 'display_unit': unit, 'detail_market': market, 'methodology_version': VERSION,
         'edition_version': EDITION_VERSION, 'latest_report_date': latest,
         'latest_source_fingerprint': fingerprint([r for r in raw if r['report_date_as_yyyy_mm_dd'][:10] == latest]),
         'generated_at_utc': generated, 'offline': offline, **provenance,
@@ -146,7 +153,8 @@ def build(raw, out, provenance, offline=False):
         'checks': {'unique_date_market': True, 'nonnegative_integer_counts': True,
                    'futures_only': True, 'both_open_interest_identities_all_rows': True,
                    'latest_universe_complete': True, 'decomposition': True, 'percentile_range': True,
-                   'panel_and_pdf_generated': True},
+                   'panel_and_pdf_generated': True, 'all_detail_pairs_complete': True, 'calendar_horizons': True,
+                   'physical_conversion_all_rows': all(r['tonnes_per_contract'] is not None for r in rows)},
         'freshness': 'Position date is not publication date. API maximum is not proof of the latest scheduled release.',
         'files': {p.name: digest(p) for p in sorted(out.iterdir()) if p.is_file()},
     }
@@ -188,7 +196,11 @@ def ready(root, entry):
 def prepare(root, state, raw, provenance, date, source_hash, supersedes=None):
     staging = Path(tempfile.mkdtemp(prefix='.building-', dir=root))
     try:
-        build(raw, staging, provenance)
+        config = state.get('configuration', DEFAULT_CONFIG)
+        if config == DEFAULT_CONFIG:
+            build(raw, staging, provenance)
+        else:
+            build(raw, staging, provenance, **config)
         # A partial render must never replace the pending edition.
         if not all((staging / name).is_file() for name in (PANEL, PDF)):
             raise ValueError('Renderer must produce both PNG and PDF.')
@@ -215,7 +227,7 @@ def prepare(root, state, raw, provenance, date, source_hash, supersedes=None):
 def upgrade_pending(root, state):
     """Rebuild a legacy pending edition from its verified evidence, without fetching."""
     entry = state['pending']
-    if entry['edition_version'] != '1.0.0':
+    if entry['edition_version'] not in ('1.0.0', '1.1.0'):
         raise ValueError('Unsupported pending edition version; use the matching skill version or an explicit migration.')
     folder = verify_edition(root, entry)
     if not {'cftc-source.json', 'validation.json'}.issubset(entry['files']):
@@ -231,20 +243,37 @@ def upgrade_pending(root, state):
     return prepare(root, state, raw, provenance, date, source_hash, supersedes=entry['edition_id'])
 
 
-def run(root):
+DEFAULT_CONFIG = {'report': 'legacy', 'unit': 'contracts', 'market': None}
+
+
+def resolve_config(root, report=None, unit=None, market=None):
+    # Existing 1.x destinations retain Legacy; a fresh CLI destination starts in Managed Money.
+    state=load_state(root)
+    existing=(root/'state.json').exists()
+    base=state.get('configuration', DEFAULT_CONFIG if existing else {**DEFAULT_CONFIG,'report':'managed-money'})
+    result={'report': report or base['report'], 'unit': unit or base['unit'],
+            'market': market if market is not None else base['market']}
+    if existing and result != base:
+        raise ValueError('This state directory is bound to a different report/unit/market. Use a separate persistent state directory for the requested view.')
+    return result
+
+
+def run(root, report='legacy', unit='contracts', market=None):
     with lock(root):
         state = load_state(root)
+        config = resolve_config(root, report, unit, market)
+        state['configuration'] = config
         if state['pending']:
             if state['pending']['edition_version'] != EDITION_VERSION:
                 return upgrade_pending(root, state)
             return ready(root, state['pending'])
-        date, source_hash = check_source()
+        date, source_hash = check_source() if report=='legacy' else check_source(report)
         guard_date(state, date)
         if same(state['last_published'], date, source_hash):
             return None
-        raw, provenance = collect()
+        raw, provenance = collect() if report=='legacy' else collect(report)
         # The full validated collection is authoritative, even if the lightweight query differed.
-        rows = validate(raw)
+        rows = validate(raw, report)
         date = max(r['report_date'] for r in rows)
         source_hash = fingerprint([r for r in raw if r['report_date_as_yyyy_mm_dd'][:10] == date])
         guard_date(state, date)
@@ -283,6 +312,9 @@ def main():
     commands = parser.add_subparsers(dest='command', required=True)
     p = commands.add_parser('run', help='Prepare a new edition; no stdout if unchanged.')
     p.add_argument('--state-dir', required=True, type=Path)
+    p.add_argument('--report', choices=REPORTS)
+    p.add_argument('--unit', choices=['contracts','mmt','pct-oi'])
+    p.add_argument('--market', choices=MARKETS)
     p = commands.add_parser('ack', help='Record confirmed delivery after rendering and durable handoff.')
     p.add_argument('--state-dir', required=True, type=Path)
     p.add_argument('--edition-id', required=True)
@@ -290,16 +322,21 @@ def main():
     p = commands.add_parser('render', help='Reproduce saved official JSON offline; never advances publication state.')
     p.add_argument('--input', required=True, type=Path)
     p.add_argument('--output', required=True, type=Path)
+    p.add_argument('--report', choices=REPORTS, default='managed-money')
+    p.add_argument('--unit', choices=['contracts','mmt','pct-oi'], default='contracts')
+    p.add_argument('--market', choices=MARKETS)
     args = parser.parse_args()
     try:
         if args.command == 'run':
-            result = run(args.state_dir.expanduser().resolve())
+            root=args.state_dir.expanduser().resolve()
+            config=resolve_config(root,args.report,args.unit,args.market)
+            result = run(root,**config)
         elif args.command == 'ack':
             result = acknowledge(args.state_dir.expanduser().resolve(), args.edition_id, args.delivery_receipt)
         else:
             raw = json.loads(args.input.read_text(encoding='utf-8'))
             receipt = build(raw, args.output.resolve(), {'fetched_at_utc': None, 'source_query': None,
-                           'input_sha256': digest(args.input)}, offline=True)
+                           'input_sha256': digest(args.input)}, offline=True, report=args.report, unit=args.unit, market=args.market)
             result = {'status': 'OFFLINE', 'panel_path': str(args.output.resolve() / PANEL),
                       'pdf_path': str(args.output.resolve() / PDF),
                       'presentation': presentation(args.output.resolve()),

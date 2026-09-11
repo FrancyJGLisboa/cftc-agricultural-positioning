@@ -16,9 +16,23 @@ The pending edition is returned unchanged on retries. It is drained before check
 
 ## Upgrading existing state
 
-English edition version 1.1.0 adds the PDF and ordered presentation contract. A previously acknowledged 1.0.0 snapshot is eligible for one new edition even if the source is unchanged. Normal silent checks resume after the pair is acknowledged.
+English edition version 2.0.0 adds report modes, extended analytics and seasonal views. A previously acknowledged 1.x snapshot is eligible for one new edition even if the source is unchanged. Normal silent checks resume after the pair is acknowledged.
 
-A pending older edition is verified and rebuilt from its retained `cftc-source.json` before any new network collection. Its original folder is retained unchanged; the replacement has a new edition/idempotency key and records `supersedes_pending_edition` in the event log. A failed rebuild leaves the original state and pending edition intact. Missing or corrupt source evidence requires restoration; never discard publication history. Current-version pending editions missing either output fail verification instead of being delivered partially.
+A pending 1.0.0 or 1.1.0 Legacy edition is verified and rebuilt from its retained `cftc-source.json` before any new network collection. Its original folder is retained unchanged; the replacement has a new edition/idempotency key and records `supersedes_pending_edition` in the event log. A failed rebuild leaves the original state and pending edition intact. Missing or corrupt source evidence requires restoration; never discard publication history. Current-version pending editions missing either output fail verification instead of being delivered partially.
+
+State configuration binds a destination to `report`, `unit` and optional `market`. Omitted CLI options reuse the binding. State without configuration is a Legacy/contracts/summary destination. New CLI state defaults to Managed Money/contracts/summary. A mismatch fails before collection or state writes; use a separate persistent directory for a different view. Never reset existing history to enable a new report mode. Internal Python functions retain their Legacy defaults for compatibility; the CLI performs new-state Managed Money selection.
+
+Examples (use absolute installed paths in an agent invocation):
+
+```bash
+python scripts/radar.py run --state-dir /persistent/cftc-mm --report managed-money
+python scripts/radar.py run --state-dir /persistent/cftc-mm-mmt --report managed-money --unit mmt
+python scripts/radar.py run --state-dir /persistent/cftc-corn-detail --report managed-money --market 002602 --unit pct-oi
+python scripts/radar.py run --state-dir /persistent/cftc-legacy --report legacy
+python scripts/radar.py render --input /saved/cftc-source.json --output /empty/corn --report managed-money --market 002602 --unit mmt
+```
+
+For a detail request using already retained evidence, prefer offline `render` with the matching report, unit and market over creating a recurring destination. It returns the same ordered PNG/PDF presentation with an OFFLINE label.
 
 ## Scheduling and concurrency
 
@@ -37,9 +51,10 @@ Source regression, incomplete latest coverage, malformed data, rendering failure
 ## Files retained for each edition
 
 - One decision panel in PNG and matching one-page PDF, exported from the same Matplotlib figure with no new runtime dependency.
-- Thirteen individual PNG charts retained internally.
+- Thirteen commodity detail pages, each a matching PNG/PDF pair, retained internally. A selected detail page becomes the canonical displayed pair.
 - `cftc-source.json`: original selected CFTC fields and quantities.
-- `history.csv`, `latest-report.csv`: organized positions and four metrics.
+- `history.csv`, `latest-report.csv`: organized positions, conversions, extended metrics, comparison dates and coverage status.
+- `seasonality.json`: year windows, bin alignment, reference counts, curves and observation dates.
 - `diagnostics.json`, `highlights.json`: deterministic English observations.
 - `validation.json`: source query, retrieval time, raw-download hash, canonical latest fingerprint, validation checks, and artifact hashes.
 

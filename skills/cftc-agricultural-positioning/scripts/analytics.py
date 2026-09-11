@@ -1,8 +1,10 @@
 """Deterministic positioning diagnostics, version 2.0. No prediction model."""
 from datetime import date,timedelta
 from collections import defaultdict
+from statistics import median
+from units import value
 
-VERSION='2.0'
+VERSION='3.0'
 MIN_REFERENCE=208
 MAX_CONTIGUOUS_DAYS=10
 
@@ -24,6 +26,8 @@ def driver(a,b,total):
 
 def enrich(rows):
     groups=defaultdict(list)
+    categories={r.get('report','legacy') for r in rows}
+    if len(categories)>1:raise ValueError('Analytics cannot mix report categories')
     for r in rows:groups[r['market_code']].append(dict(r))
     result=[]
     for code,items in groups.items():
@@ -67,6 +71,33 @@ def enrich(rows):
                   net_change_pct_previous_oi=100*total/prev['open_interest_contracts'] if prev['open_interest_contracts']>0 else None,
                   decomposition_driver=driver(a,b,total),decomposition_verified=True,persistence_direction=direction,
                   persistence_reports=count,persistence_at_least=bool(count and left_censored))
+            r['delta_open_interest_contracts'] = r['open_interest_contracts']-items[i-1]['open_interest_contracts'] if i else None
+            r['net_mmt'] = value(r, unit='mmt')
+            # Extrema use the same five-year boundary, but include the current observation.
+            history=[items[j] for j in range(i+1) if dates[j]>=cutoff]
+            r['extrema_window_start']=cutoff.isoformat()
+            r['extrema_window_end']=d.isoformat()
+            for name, chooser in [('min', min), ('max', max)]:
+                extreme=chooser(x['net_contracts'] for x in history) if qualified else None
+                r['net_'+name+'_5y_contracts']=extreme
+                r['net_'+name+'_5y_date']=next((x['report_date'] for x in reversed(history) if x['net_contracts']==extreme),None)
+            for weeks in (4,13):
+                target=d-timedelta(weeks=weeks)
+                j=next((j for j in range(i) if dates[j]==target),None)
+                valid=j is not None and all((dates[k]-dates[k-1]).days<=MAX_CONTIGUOUS_DAYS for k in range(j+1,i+1))
+                prefix=f'net_change_{weeks}w'
+                r[prefix+'_reference_date']=target.isoformat() if valid else None
+                r[prefix+'_status']='valid' if valid else 'missing_reference_or_gap'
+                r[prefix+'_contracts']=r['net_contracts']-items[j]['net_contracts'] if valid else None
+                a=value(r,unit='pct-oi');b=value(items[j],unit='pct-oi') if valid else None
+                r[prefix+'_pct_oi_pp']=a-b if a is not None and b is not None else None
+                a=value(r,unit='mmt');b=value(items[j],unit='mmt') if valid else None
+                same_spec=valid and r.get('tonnes_per_contract')==items[j].get('tonnes_per_contract')
+                r[prefix+'_mmt']=a-b if a is not None and b is not None and same_spec else None
+            r['net_change_previous_pct_oi_pp']=None
+            if i:
+                a=value(r,unit='pct-oi');b=value(items[i-1],unit='pct-oi')
+                if a is not None and b is not None:r['net_change_previous_pct_oi_pp']=a-b
             result.append(r)
     return sorted(result,key=lambda r:(r['market_code'],r['report_date']))
 
@@ -111,3 +142,34 @@ def diagnostics(latest):
       -abs((x['metrics']['net_percentile_5y'] if x['metrics']['net_percentile_5y'] is not None else 50)-50),
       -abs(x['metrics']['net_change_pct_previous_oi'] or 0),x['market_code']))
     return all_items,ranked
+
+
+def seasonal_week(d):
+    """Fixed Jan-1 seven-day bins on a non-leap calendar; Feb 29 maps to Feb 28."""
+    aligned=date(2001,d.month,28 if d.month==2 and d.day==29 else d.day)
+    return (aligned.timetuple().tm_yday-1)//7+1
+
+
+def seasonality(items, latest, unit='contracts'):
+    """Prior five calendar years; >=3 available years per bin; no interpolation."""
+    asof=date.fromisoformat(latest);year=asof.year
+    buckets={}
+    for r in sorted(items,key=lambda r:r['report_date']):
+        d=date.fromisoformat(r['report_date'])
+        if year-5<=d.year<=year and d<=asof:
+            buckets[(d.year,seasonal_week(d))]=(value(r,unit=unit),r['report_date'])
+    weeks=[]
+    for week in range(1,54):
+        references=[buckets[(y,week)][0] for y in range(year-5,year)
+                    if (y,week) in buckets and buckets[(y,week)][0] is not None]
+        valid=len(references)>=3
+        current=buckets.get((year,week),(None,None))
+        previous=buckets.get((year-1,week),(None,None))
+        weeks.append({'week':week,'reference_n':len(references),
+            'median':median(references) if valid else None,'min':min(references) if valid else None,
+            'max':max(references) if valid else None,'current':current[0],'current_date':current[1],
+            'previous':previous[0],'previous_date':previous[1]})
+    return {'unit':unit,'current_year':year,'previous_year':year-1,
+            'reference_years':list(range(year-5,year)), 'minimum_reference_years':3,
+            'alignment':'Jan-1 seven-day bins; Feb 29 maps to Feb 28; last observation per bin',
+            'weeks':weeks}
