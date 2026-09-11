@@ -1,0 +1,14 @@
+interface:
+  display_name: CFTC Agricultural Positioning
+  short_description: CFTC-only agricultural positioning in one decision panel
+  default_prompt: Use $cftc-agricultural-positioning to generate the validated agricultural
+    positioning panel.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

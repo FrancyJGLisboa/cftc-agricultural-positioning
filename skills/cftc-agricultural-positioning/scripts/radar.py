@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+"""Portable CFTC radar: prepare an edition, then acknowledge confirmed delivery.
+
+JSON stdout is an internal adapter protocol, never user-facing prose.
+A no-change run emits no stdout. Errors use stderr and exit 1.
+"""
+import argparse
+from contextlib import contextmanager
+import csv
+from datetime import datetime, timezone
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import sys
+import tempfile
+import uuid
+
+from analytics import VERSION, enrich
+from cftc_positioning import FIELDS, MARKETS, PAGE, WHERE, fetch, fingerprint, newest, validate
+
+EDITION_VERSION = '1.0.0'
+PANEL = 'cftc-agricultural-positioning.png'
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def digest(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def atomic_json(path, data):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix='.' + path.name, dir=path.parent)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2, allow_nan=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+@contextmanager
+def lock(root):
+    """Exclusive filesystem lock; never automatically steal a potentially live lock."""
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / '.run.lock'
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError as exc:
+        raise RuntimeError('Another operation holds the state lock. If it crashed, confirm it stopped before removing .run.lock.') from exc
+    try:
+        with os.fdopen(fd, 'w') as f:
+            f.write(json.dumps({'pid': os.getpid(), 'created_at': now()}))
+        yield
+    finally:
+        path.unlink()
+
+
+def load_state(root):
+    path = root / 'state.json'
+    if not path.exists():
+        if (root / 'editions').exists() and any((root / 'editions').iterdir()):
+            raise RuntimeError('State is missing but editions exist; restore state instead of resetting publication history.')
+        return {'schema_version': 1, 'run_log': [], 'pending': None, 'last_published': None}
+    state = json.loads(path.read_text(encoding='utf-8'))
+    if state.get('schema_version') != 1 or not isinstance(state.get('run_log'), list) or 'pending' not in state or 'last_published' not in state:
+        raise ValueError('Unsupported or invalid state; restore the last valid state.')
+    for entry in [state['pending'], state['last_published']]:
+        if entry is not None and (not isinstance(entry, dict) or any(k not in entry for k in ['edition_id','report_date','source_fingerprint','edition_version','files'])):
+            raise ValueError('Invalid edition record in state.')
+    return state
+
+
+def same(entry, report_date, source_hash):
+    return bool(entry and entry['report_date'] == report_date and entry['source_fingerprint'] == source_hash and entry['edition_version'] == EDITION_VERSION)
+
+
+def guard_date(state, report_date):
+    previous = state.get('last_published')
+    if previous and report_date < previous['report_date']:
+        raise ValueError('Source reference date regressed; preserving the last published edition.')
+
+
+def collect():
+    raw, query, raw_hash = fetch({'$select': ','.join(FIELDS), '$where': WHERE + " AND report_date_as_yyyy_mm_dd >= '2016-08-01T00:00:00.000'", '$order': 'report_date_as_yyyy_mm_dd,cftc_contract_market_code', '$limit': 50000})
+    if len(raw) >= 50000:
+        raise ValueError('Query may be truncated; pagination is required before publication.')
+    return raw, {'source_query': query, 'download_sha256': raw_hash, 'fetched_at_utc': now()}
+
+
+def check_source():
+    date = newest()
+    raw, query, raw_hash = fetch({'$select': ','.join(FIELDS), '$where': WHERE + " AND report_date_as_yyyy_mm_dd='" + date + "'", '$limit': 100})
+    rows = validate(raw)
+    if len(rows) != 13 or {r['report_date'] for r in rows} != {date[:10]}:
+        raise ValueError('Latest snapshot does not match the requested complete date.')
+    return date[:10], fingerprint(raw)
+
+
+def write_csv(path, rows):
+    with path.open('w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def build(raw, out, provenance, offline=False):
+    """Validation precedes every artifact write. Out must be an empty staging directory."""
+    rows = enrich(validate(raw))
+    latest = max(r['report_date'] for r in rows)
+    if not all(r['decomposition_verified'] for r in rows if r['previous_report_date']):
+        raise ValueError('Decomposition failed.')
+    if not all(0 <= r['net_percentile_5y'] <= 100 for r in rows if r['net_percentile_5y'] is not None):
+        raise ValueError('Percentile out of range.')
+    if out.exists() and any(out.iterdir()):
+        raise ValueError('Output directory must be empty to avoid mixed editions.')
+    out.mkdir(parents=True, exist_ok=True)
+    atomic_json(out / 'cftc-source.json', raw)
+    write_csv(out / 'history.csv', rows)
+    from reporting import render_v2
+    generated = now()
+    last, diagnostic_rows, highlights = render_v2(rows, out, latest, provenance.get('fetched_at_utc') or generated, MARKETS, offline=offline)
+    write_csv(out / 'latest-report.csv', last)
+    atomic_json(out / 'diagnostics.json', diagnostic_rows)
+    atomic_json(out / 'highlights.json', highlights)
+    receipt = {
+        'dataset': '6dca-aqww', 'source_page': PAGE, 'category': 'Non-Commercial',
+        'report_type': 'FutOnly', 'units': 'contracts', 'methodology_version': VERSION,
+        'edition_version': EDITION_VERSION, 'latest_report_date': latest,
+        'latest_source_fingerprint': fingerprint([r for r in raw if r['report_date_as_yyyy_mm_dd'][:10] == latest]),
+        'generated_at_utc': generated, 'offline': offline, **provenance,
+        'rows': len(rows), 'market_count': len(MARKETS),
+        'observations_per_market': {c: sum(r['market_code'] == c for r in rows) for c in MARKETS},
+        'checks': {'unique_date_market': True, 'nonnegative_integer_counts': True,
+                   'futures_only': True, 'both_open_interest_identities_all_rows': True,
+                   'latest_universe_complete': True, 'decomposition': True, 'percentile_range': True},
+        'freshness': 'Position date is not publication date. API maximum is not proof of the latest scheduled release.',
+        'files': {p.name: digest(p) for p in sorted(out.iterdir()) if p.is_file()},
+    }
+    atomic_json(out / 'validation.json', receipt)
+    return receipt
+
+
+def verify_edition(root, entry):
+    folder = root / 'editions' / entry['edition_id']
+    if folder.parent.resolve() != (root / 'editions').resolve():
+        raise ValueError('Invalid edition location.')
+    for name, expected in entry['files'].items():
+        if Path(name).name != name or digest(folder / name) != expected:
+            raise ValueError('Edition evidence is missing or modified; refusing delivery acknowledgement.')
+    return folder
+
+
+def ready(root, entry):
+    folder = verify_edition(root, entry)
+    return {'status': 'READY', 'edition_id': entry['edition_id'], 'report_date': entry['report_date'],
+            'panel_path': str(folder / PANEL), 'panel_sha256': entry['files'][PANEL],
+            'evidence_directory': str(folder), 'delivery_idempotency_key': entry['edition_id']}
+
+
+def run(root):
+    with lock(root):
+        state = load_state(root)
+        if state['pending']:
+            return ready(root, state['pending'])
+        date, source_hash = check_source()
+        guard_date(state, date)
+        if same(state['last_published'], date, source_hash):
+            return None
+        raw, provenance = collect()
+        # The full validated collection is authoritative, even if the lightweight query differed.
+        rows = validate(raw)
+        date = max(r['report_date'] for r in rows)
+        source_hash = fingerprint([r for r in raw if r['report_date_as_yyyy_mm_dd'][:10] == date])
+        guard_date(state, date)
+        if same(state['last_published'], date, source_hash):
+            return None
+        # Persist the initial empty state before materializing any edition; never infer delivery from files.
+        if not (root / 'state.json').exists():
+            atomic_json(root / 'state.json', state)
+        staging = Path(tempfile.mkdtemp(prefix='.building-', dir=root))
+        try:
+            receipt = build(raw, staging, provenance)
+            edition_id = date + '-' + source_hash[:16] + '-' + uuid.uuid4().hex[:8]
+            editions = root / 'editions'
+            editions.mkdir(exist_ok=True)
+            staging.rename(editions / edition_id)
+            folder = editions / edition_id
+            entry = {'edition_id': edition_id, 'report_date': date, 'source_fingerprint': source_hash,
+                     'edition_version': EDITION_VERSION,
+                     'files': {p.name: digest(p) for p in folder.iterdir() if p.is_file()}}
+            state['pending'] = entry
+            state['run_log'].append({'event': 'prepared', 'at_utc': now(), 'edition_id': edition_id})
+            atomic_json(root / 'state.json', state)
+            return ready(root, entry)
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging)
+
+
+def acknowledge(root, edition_id, delivery_receipt):
+    with lock(root):
+        state = load_state(root)
+        entry = state['pending']
+        if not entry:
+            if state['last_published'] and state['last_published']['edition_id'] == edition_id:
+                return {'status': 'ALREADY_ACKNOWLEDGED'}
+            raise ValueError('No matching pending edition.')
+        if entry['edition_id'] != edition_id:
+            raise ValueError('Acknowledgement does not match the pending edition.')
+        verify_edition(root, entry)
+        state['last_published'] = entry
+        state['pending'] = None
+        state['last_success_at_utc'] = now()
+        state['run_log'].append({'event': 'delivered', 'at_utc': now(), 'edition_id': edition_id,
+                                 'delivery_receipt': delivery_receipt})
+        atomic_json(root / 'state.json', state)
+        return {'status': 'ACKNOWLEDGED'}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest='command', required=True)
+    p = commands.add_parser('run', help='Prepare a new edition; no stdout if unchanged.')
+    p.add_argument('--state-dir', required=True, type=Path)
+    p = commands.add_parser('ack', help='Record confirmed delivery after rendering and durable handoff.')
+    p.add_argument('--state-dir', required=True, type=Path)
+    p.add_argument('--edition-id', required=True)
+    p.add_argument('--delivery-receipt', required=True)
+    p = commands.add_parser('render', help='Reproduce saved official JSON offline; never advances publication state.')
+    p.add_argument('--input', required=True, type=Path)
+    p.add_argument('--output', required=True, type=Path)
+    args = parser.parse_args()
+    try:
+        if args.command == 'run':
+            result = run(args.state_dir.expanduser().resolve())
+        elif args.command == 'ack':
+            result = acknowledge(args.state_dir.expanduser().resolve(), args.edition_id, args.delivery_receipt)
+        else:
+            raw = json.loads(args.input.read_text(encoding='utf-8'))
+            receipt = build(raw, args.output.resolve(), {'fetched_at_utc': None, 'source_query': None,
+                           'input_sha256': digest(args.input)}, offline=True)
+            result = {'status': 'OFFLINE', 'panel_path': str(args.output.resolve() / PANEL),
+                      'report_date': receipt['latest_report_date']}
+        if result is not None:
+            print(json.dumps(result))
+        return 0
+    except Exception as exc:
+        signature = hashlib.sha256((type(exc).__name__ + ':' + str(exc)).encode()).hexdigest()
+        print(json.dumps({'status': 'ERROR', 'error_type': type(exc).__name__, 'message': str(exc),
+                          'failure_signature': signature}), file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
