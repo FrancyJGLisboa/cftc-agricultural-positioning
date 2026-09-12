@@ -1,0 +1,56 @@
+[
+  {
+    "example": "managed-money-overview",
+    "report": "managed-money",
+    "display_unit": "contracts",
+    "market": null,
+    "position_date": "2026-09-08",
+    "generation_mode": "live CFTC retrieval",
+    "files": {
+      "managed-money-overview.png": "45fed744791ed0a3b6a59e5375809509cc61593a82726f49f409007a78f22481",
+      "managed-money-overview.pdf": "bc2675a6d8c992a0dbe324640d50d4fd4f33c17574a19664117d6e2ea5b65eff"
+    }
+  },
+  {
+    "example": "soybeans-mmt",
+    "report": "managed-money",
+    "display_unit": "mmt",
+    "market": "005602",
+    "position_date": "2026-09-08",
+    "generation_mode": "live CFTC retrieval",
+    "files": {
+      "soybeans-mmt.png": "3cafe7016c1557900e197141d7f5476f3c2723120831bf78b930d26f821c96d8",
+      "soybeans-mmt.pdf": "fb4d597df01a6ee572faad36a0a43f1988fef56f959f69f6c793c2e50ee6f001"
+    },
+    "source_dataset": "72hh-3qpy",
+    "source_fingerprint": "6c3360cd70d6fdfc86f117e921c85bca46473e36080e9724f89ff0d1127bd9e4"
+  },
+  {
+    "example": "corn-pct-oi",
+    "report": "managed-money",
+    "display_unit": "pct-oi",
+    "market": "002602",
+    "position_date": "2026-09-08",
+    "generation_mode": "offline reproduction",
+    "files": {
+      "corn-pct-oi.png": "2001107e710e071ae02e365b70fb56265aaeacf1bfb0d63ab840052ea91a9e0c",
+      "corn-pct-oi.pdf": "80820a5c78d780d67ebb602eb1d71b6a27c80157c15251987226cca3dc035377"
+    },
+    "source_dataset": "72hh-3qpy",
+    "source_fingerprint": "6c3360cd70d6fdfc86f117e921c85bca46473e36080e9724f89ff0d1127bd9e4"
+  },
+  {
+    "example": "legacy-overview",
+    "report": "legacy",
+    "display_unit": "contracts",
+    "market": null,
+    "position_date": "2026-09-08",
+    "generation_mode": "offline reproduction",
+    "files": {
+      "legacy-overview.png": "5f138c7c73faeca112c05a3fa0dd368a607562337015a5cdb2f59f64e8bf7f63",
+      "legacy-overview.pdf": "0fa97c294295156d43114bf220af6284ebbf033d18a99ee58375f8e0fc5e511b"
+    },
+    "source_dataset": "6dca-aqww",
+    "source_fingerprint": "71115dff93b569813ca959cc567b6b2b747f1558f23317c1240779ff18cfda42"
+  }
+]

@@ -4,6 +4,79 @@ An English Agent Skill that turns official CFTC agricultural positioning into on
 
 The final successful user-facing output is **the panel displayed automatically, with a Download PDF link immediately underneath**. The PNG and matching one-page PDF come from the same Matplotlib figure, with no new runtime dependency. A recurring check with no new or revised latest snapshot stays silent. Data, detailed charts, validation receipts, and delivery state remain internal unless requested.
 
+## Example prompts and outputs
+
+After installing the skill, ask your agent in natural language. It selects the view, retrieves and validates CFTC data, and presents **one panel image followed immediately by Download PDF**. You can then ask for another commodity, unit or category, or ask the agent to explain a metric.
+
+The images below are **actual skill outputs with positions as of September 8, 2026**, generated during the September 11 tests. They are fixed examples, not a live dashboard. The hypothetical prompts request the same views; a new live run can return a different date and different values. All panels are in English.
+
+| Start with | View | Example |
+| --- | --- | --- |
+| A general overview | Managed Money, 13 markets, contracts | [Overview](#1-general-overview) |
+| A physical equivalent | Soybeans, Managed Money, million metric tonnes | [Soybeans](#2-soybeans-in-million-metric-tonnes) |
+| A detailed analyst view | Corn, Managed Money, percent of open interest | [Corn](#3-corn-as-a-percentage-of-open-interest) |
+| Another reporting category | Legacy Non-Commercial, 13 markets, contracts | [Legacy](#4-legacy-non-commercial-overview) |
+
+### 1. General overview
+
+**Example prompt**
+
+> Use cftc-agricultural-positioning to show the latest Managed Money positioning across agricultural commodities in contracts. Display the panel with a Download PDF link immediately underneath.
+
+**What you get:** the thirteen-market table, weekly and 4/13-week changes, historical percentiles and extremes, net/OI, persistence, and three seasonal charts selected by the skill's rules. This example was generated through a live CFTC retrieval.
+
+![Managed Money overview in contracts, positions as of September 8, 2026](examples/managed-money-overview.png)
+
+[Download PDF](examples/managed-money-overview.pdf)
+
+### 2. Soybeans in million metric tonnes
+
+**Example follow-up prompt**
+
+> Now show only soybeans, keeping Managed Money, in million metric tonnes of physical equivalent. Include the seasonal chart and display the panel with its PDF underneath.
+
+**What you get:** a soybean detail page with seasonal positioning, long/short/net history, changes and historical context. MMT describes the physical equivalent of contracts, not inventory or money invested. Decomposition, open interest and historical extrema retain their labeled contract units. This example was generated through a live CFTC retrieval.
+
+![Soybean detail in million metric tonnes, positions as of September 8, 2026](examples/soybeans-mmt.png)
+
+[Download PDF](examples/soybeans-mmt.pdf)
+
+### 3. Corn as a percentage of open interest
+
+**Example prompt**
+
+> Use cftc-agricultural-positioning to show the latest corn Managed Money detail as a percentage of open interest, including seasonal positioning, 4- and 13-week changes, and the weekly decomposition into long and short contributions. Display the panel and its PDF.
+
+**What you get:** a corn detail page normalized by the open interest at each date. Changes in this view are **percentage points**; the decomposition remains in contracts. The displayed sample was reproduced from a saved official snapshot and therefore carries an **OFFLINE REPRODUCTION** footer. The prompt above requests a live run of the same view.
+
+![Corn detail as a percentage of open interest, offline sample for September 8, 2026](examples/corn-pct-oi.png)
+
+[Download PDF](examples/corn-pct-oi.pdf)
+
+### 4. Legacy Non-Commercial overview
+
+**Example prompt**
+
+> Use cftc-agricultural-positioning to show the latest Legacy Non-Commercial agricultural positioning in contracts. Keep it separate from Managed Money and display the panel with its PDF underneath.
+
+**What you get:** the summary for the Legacy Non-Commercial category, which can differ from Managed Money. The displayed sample is an **offline reproduction** of an official saved Legacy snapshot; the prompt requests a live run of that category.
+
+![Legacy Non-Commercial overview in contracts, offline sample for September 8, 2026](examples/legacy-overview.png)
+
+[Download PDF](examples/legacy-overview.pdf)
+
+### Ask about the result
+
+After receiving a panel, you can ask:
+
+> Explain the soybean percentile in plain English. Does a value of 100 mean that the price will fall?
+
+The agent should explain that the percentile describes historical positioning, not the probability of a future price move. Explicit interpretation requests can receive an explanation; a successful panel request normally returns only the image/PDF pair.
+
+**Display depends on your host.** A host with image rendering displays the PNG in the conversation. In VS Code, the agent uses a supported preview integration when available. If the host cannot display an image, it should provide accessible PNG/PDF links and explain that limitation. Installing the skill does not install a viewer or bypass corporate permissions.
+
+See [example provenance and file checksums](examples/README.md). These samples illustrate the output; they are not trading recommendations.
+
 ## Install in VS Code without Node.js or npx
 
 With GitHub Copilot in VS Code, installation is a folder copy:
@@ -89,7 +162,7 @@ MMT is a physical equivalent, not money invested or deliverable inventory. Conve
 python -m unittest discover -s skills/cftc-agricultural-positioning/scripts -p 'test_*.py' -v
 ```
 
-Tests use synthetic records, not market evidence. Collection additionally validates all source rows, complete latest coverage, integer counts, open-interest identities, and decomposition. CI exercises supported Python versions on Linux and Windows. Runtime state and retrieved market data are excluded from this repository.
+Tests use synthetic records, not market evidence. Collection additionally validates all source rows, complete latest coverage, integer counts, open-interest identities, and decomposition. CI exercises supported Python versions on Linux and Windows. Runtime state and raw retrieved market data are excluded from this repository. The dated rendered examples above are intentionally included for documentation.
 
 Reproduce an official saved snapshot without publishing:
 
